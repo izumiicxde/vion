@@ -4,7 +4,7 @@ const { mockContents, simulateLatency } = require("../helpers/mockData");
 
 const getDashboardSummary = async (req, res) => {
     const targetUserId = req.params.id;
-    
+
     console.log(`[Controller] Simulating complex aggregation for user ${targetUserId}...`);
     await simulateLatency(1000, 2000);
 
@@ -64,7 +64,7 @@ const advancedSearch = async (req, res) => {
     await simulateLatency(600, 1500);
 
     let results = Object.values(mockContents);
-    
+
     // --- Filtering Logic ---
     if (q) {
         const lowerQ = q.toLowerCase();

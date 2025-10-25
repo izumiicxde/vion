@@ -1,6 +1,6 @@
 // controllers/analyticsController.js
 
-const { simulateLatency, mockContents, mockJobs, generateCSV } = require("../helpers/mockData");
+const { simulateLatency, mockContents, mockJobs, generateCSV } = require("../helpers/mockdata");
 
 const generateTrendData = (count, baseValue, variability, id_seed = "") => {
     const data = [];
@@ -9,7 +9,7 @@ const generateTrendData = (count, baseValue, variability, id_seed = "") => {
         currentValue += (Math.random() - 0.5) * variability;
         data.push({
             date: new Date(Date.now() - (count - 1 - i) * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-            value: Math.max(0, Math.round(currentValue * (id_seed ? 0.5 + Math.random() : 1))), 
+            value: Math.max(0, Math.round(currentValue * (id_seed ? 0.5 + Math.random() : 1))),
         });
     }
     return data;
@@ -24,7 +24,7 @@ const getContentPerformance = async (req, res) => {
     if (tag) {
         filteredContents = filteredContents.filter((c) => c.tags && c.tags.includes(tag.toLowerCase()));
     }
-    
+
     const totalContent = filteredContents.length;
     const totalViews = filteredContents.reduce((sum, c) => sum + c.views, 0);
     const totalLikes = filteredContents.reduce((sum, c) => sum + c.likes, 0);
@@ -39,7 +39,7 @@ const getContentPerformance = async (req, res) => {
             totalLikes,
             avgLikesPerContent,
             uniqueAuthors: [...new Set(filteredContents.map((c) => c.author))].length,
-            topTags: ["tech", "news", "popular", "report"].sort(() => 0.5 - Math.random()).slice(0, 3), 
+            topTags: ["tech", "news", "popular", "report"].sort(() => 0.5 - Math.random()).slice(0, 3),
         },
         source: "Analytics Controller Aggregation Service",
     });
@@ -65,7 +65,7 @@ const getUserEngagementTrends = async (req, res) => {
 
 const generateReport = async (req, res) => {
     console.log(`[Controller] Initiating background job...`);
-    await simulateLatency(200, 500); 
+    await simulateLatency(200, 500);
 
     const { report_type, filters } = req.body;
     const jobId = `report-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
@@ -80,12 +80,12 @@ const generateReport = async (req, res) => {
         const job = mockJobs.get(jobId);
         if (job) {
             job.status = "processing"; job.progress = 20;
-            await simulateLatency(3000, 7000); 
+            await simulateLatency(3000, 7000);
             job.progress = 80;
-            await simulateLatency(1000, 2000); 
-            
+            await simulateLatency(1000, 2000);
+
             const reportData = Object.values(mockContents).map((c) => ({
-                id: c.id, title: c.title, author: c.author, views: c.views, likes: c.likes, comments: c.comments_count, tags: c.tags, createdAt: c.createdAt, 
+                id: c.id, title: c.title, author: c.author, views: c.views, likes: c.likes, comments: c.comments_count, tags: c.tags, createdAt: c.createdAt,
             }));
 
             job.data = generateCSV(reportData);
@@ -93,7 +93,7 @@ const generateReport = async (req, res) => {
             job.completedAt = new Date().toISOString();
             console.log(`[Controller] Job ${jobId} completed.`);
         }
-    }, 1000); 
+    }, 1000);
 
     res.status(202).json({
         message: "Report generation started successfully",
@@ -124,7 +124,7 @@ const getReportStatus = async (req, res) => {
 const downloadReport = async (req, res) => {
     const jobId = req.params.job_id;
     console.log(`[Controller] Simulating file retrieval for job ${jobId}.`);
-    await simulateLatency(800, 2000); 
+    await simulateLatency(800, 2000);
 
     const job = mockJobs.get(jobId);
     if (job && job.status === "completed") {
