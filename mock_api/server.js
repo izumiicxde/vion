@@ -2,7 +2,7 @@
 
 const express = require("express");
 const { authMiddleware } = require("./middleware/auth");
-const { simulateLatency } = require("./helpers/mockData");
+const { simulateLatency } = require("./helpers/mockdata");
 
 // Import Routers
 const feedRouter = require("./routes/feed");
@@ -23,27 +23,27 @@ app.use(authMiddleware);
 
 // 0. GET /api/v1/health - Very fast health check
 app.get(`${API_VERSION}/health`, async (req, res) => {
-    console.log(`[Backend][${req.user.username}] Received GET /health.`);
-    await simulateLatency(30, 80);
-    res.json({
-        status: "healthy",
-        timestamp: new Date().toISOString(),
-        source: "Mock Backend (Root)",
-    });
+  console.log(`[Backend][${req.user.username}] Received GET /health.`);
+  await simulateLatency(30, 80);
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    source: "Mock Backend (Root)",
+  });
 });
 
 // --- Mount Routers ---
-app.use(API_VERSION, feedRouter); 
-app.use(API_VERSION, contentRouter); 
-app.use(API_VERSION, analyticsRouter); 
+app.use(API_VERSION, feedRouter);
+app.use(API_VERSION, contentRouter);
+app.use(API_VERSION, analyticsRouter);
 
 // --- Error Handling Middleware (Best practice) ---
 app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).send({ message: "Something broke!", error: err.message });
+  console.error(err.stack);
+  res.status(500).send({ message: "Something broke!", error: err.message });
 });
 
 app.listen(port, () => {
-    console.log(`Mock Backend API listening on http://localhost:${port}`);
-    console.log(`Open http://localhost:${port}${API_VERSION}/health to check.`);
+  console.log(`Mock Backend API listening on http://localhost:${port}`);
+  console.log(`Open http://localhost:${port}${API_VERSION}/health to check.`);
 });
