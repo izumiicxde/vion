@@ -20,13 +20,7 @@ app.use(authMiddleware);
 
 // 0. GET /api/v1/health - Very fast health check
 app.get(`${API_VERSION}/health`, async (req, res) => {
-  console.log(`[Backend][${req.user.username}] Received GET /health.`);
-  await simulateLatency(30, 80);
-  res.json({
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    source: "Mock Backend (Root)",
-  });
+
   console.log(`[Backend][${req.user.username}] Received GET /health.`);
   await simulateLatency(30, 80);
   res.json({
@@ -50,6 +44,9 @@ app.use((err, req, res, next) => {
   res.status(500).send({ message: "Something broke!", error: err.message });
   console.error(err.stack);
   res.status(500).send({ message: "Something broke!", error: err.message });
+});
+app.get("/", (req, res) => {
+  res.send("Mock Backend API is running! Use /api/v1/... endpoints.");
 });
 
 app.listen(port, () => {
