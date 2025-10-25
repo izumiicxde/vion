@@ -52,9 +52,7 @@ app.all(
 
 // --- Start the Proxy Server ---
 server.listen(proxyPort, () => {
-  console.log(
-    `Smart Caching Reverse Proxy running at http://localhost:${proxyPort}`
-  );
+  console.log(`Caching Reverse Proxy running at http://localhost:${proxyPort}`);
   console.log(
     `Forwarding requests to backend at http://localhost:${backendPort}`
   );

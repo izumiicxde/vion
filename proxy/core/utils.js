@@ -31,7 +31,7 @@ const getSmartCacheTTL = (req, backendResponse = null) => {
   const statusCode = backendResponse ? backendResponse.status : 200;
 
   if (path === "/api/v1/health") return 1;
-  if (path.match(/\/api\/v1\/analytics\/report\/[^/]+\/status/)) return 5;
+  // if (path.match(/\/api\/v1\/analytics\/report\/[^/]+\/status/)) return 5;
 
   // --- Stage 3: Content-Based Dynamic Rules (only if we have a response) ---
   if (backendResponse) {

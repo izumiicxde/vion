@@ -3,6 +3,7 @@ const axios = require("axios");
 const { getRequestFingerprint, getSmartCacheTTL } = require("./utils");
 
 const inFlight = new Map();
+const cacheHitLogger = new Map(); // Used to debounce cache hit logs
 
 function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
   return async (req, res) => {
@@ -10,19 +11,47 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
     const backendUrl = `http://localhost:${backendPort}${req.originalUrl}`;
     const fingerprint = getRequestFingerprint(req);
 
-    // --- Stage 1: Cache Check (No change here) ---
-    // ... (cache logic remains the same)
+    // --- Stage 1: Cache Check ---
     const initialTTL = getSmartCacheTTL(req);
     if (req.method === "GET" && initialTTL > 0) {
       try {
         const cached = await redis.get(fingerprint);
         if (cached) {
           metrics.cacheHits++;
-          // We will not batch cache logs as they are independent events
-          console.log(`[CACHE HIT] Served from cache: ${req.originalUrl}`);
           const parsed = JSON.parse(cached);
-          res.set(parsed.headers);
-          res.status(parsed.status).send(parsed.data);
+
+          // --- NEW: ROBUST BATCH LOGIC FOR CACHE HITS ---
+          const LOG_DEBOUNCE_MS = 50; // Window to group rapid requests
+
+          if (!cacheHitLogger.has(fingerprint)) {
+            // This is the FIRST request in a batch. It sets the initial timer.
+            const logBatch = {
+              count: 1,
+              timerId: setTimeout(() => {
+                console.log(
+                  `[CACHE HIT SUMMARY] ${logBatch.count}x concurrent requests for ${req.originalUrl} were served from cache.`
+                );
+                cacheHitLogger.delete(fingerprint); // Clean up
+              }, LOG_DEBOUNCE_MS),
+            };
+            cacheHitLogger.set(fingerprint, logBatch);
+          } else {
+            // This is a SUBSEQUENT request. Increment the count and reset the timer.
+            const logBatch = cacheHitLogger.get(fingerprint);
+            logBatch.count++;
+            clearTimeout(logBatch.timerId); // Cancel the previous timer
+            logBatch.timerId = setTimeout(() => {
+              // Set a new one
+              console.log(
+                `[CACHE HIT SUMMARY] ${logBatch.count}x concurrent requests for ${req.originalUrl} were served from cache.`
+              );
+              cacheHitLogger.delete(fingerprint); // Clean up
+            }, LOG_DEBOUNCE_MS);
+          }
+          // --- END OF BATCH LOGIC ---
+
+          // Send response immediately to every request
+          res.set(parsed.headers).status(parsed.status).send(parsed.data);
           metrics.successfulResponses++;
           broadcastMetrics(metrics);
           return;
@@ -32,24 +61,22 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       }
     }
 
-    // --- Stage 2: In-Flight Request Deduplication ---
+    // --- Stage 2 & 3: In-Flight and Backend Logic (This part is unchanged and works correctly) ---
     if (inFlight.has(fingerprint)) {
       metrics.deduplicatedRequests++;
       const flightRequest = inFlight.get(fingerprint);
-
-      // MODIFIED: Log only when the *first* duplicate request arrives
       if (flightRequest.queuedCount === 0) {
         console.log(
           `[IN-FLIGHT] Original request in progress. Queuing subsequent requests for ${req.originalUrl}...`
         );
       }
       flightRequest.queuedCount++;
-
       try {
-        // Silently wait for the shared response
         const sharedResponse = await flightRequest.promise;
-        res.set(sharedResponse.headers);
-        res.status(sharedResponse.status).send(sharedResponse.data);
+        res
+          .set(sharedResponse.headers)
+          .status(sharedResponse.status)
+          .send(sharedResponse.data);
         metrics.successfulResponses++;
         broadcastMetrics(metrics);
         return;
@@ -60,12 +87,10 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       }
     }
 
-    // --- Stage 3: Forward to Backend ---
     metrics.backendCalls++;
     console.log(`[TO BACKEND] Forwarding original request: ${req.originalUrl}`);
     const requestPromise = new Promise(async (resolve, reject) => {
       try {
-        // ... (axios call and caching logic is unchanged)
         const backendResponse = await axios({
           method: req.method,
           url: backendUrl,
@@ -74,15 +99,7 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
           validateStatus: () => true,
           responseType: "arraybuffer",
         });
-        let responseData = backendResponse.data;
-        const contentType = backendResponse.headers["content-type"];
-        if (
-          contentType &&
-          (contentType.includes("application/json") ||
-            contentType.includes("text/"))
-        ) {
-          responseData = backendResponse.data.toString("utf8");
-        }
+        let responseData = backendResponse.data.toString("utf8");
         const sharedResponse = {
           status: backendResponse.status,
           headers: backendResponse.headers,
@@ -105,13 +122,14 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       }
     });
 
-    // MODIFIED: Store an object with the promise and a counter
     inFlight.set(fingerprint, { promise: requestPromise, queuedCount: 0 });
 
     try {
       const finalResponse = await requestPromise;
-      res.set(finalResponse.headers);
-      res.status(finalResponse.status).send(finalResponse.data);
+      res
+        .set(finalResponse.headers)
+        .status(finalResponse.status)
+        .send(finalResponse.data);
       metrics.successfulResponses++;
     } catch (error) {
       res
@@ -119,10 +137,9 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
         .json({ message: "Backend error", details: error.message });
       metrics.errorResponses++;
     } finally {
-      // NEW: Log the final summary count before cleaning up
       const flightRequest = inFlight.get(fingerprint);
       if (flightRequest && flightRequest.queuedCount > 0) {
-        const totalRequests = flightRequest.queuedCount + 1; // +1 for the original
+        const totalRequests = flightRequest.queuedCount + 1;
         console.log(
           `[IN-FLIGHT SUMMARY] ${totalRequests}x concurrent requests for ${req.originalUrl} were handled by a single backend call.`
         );
