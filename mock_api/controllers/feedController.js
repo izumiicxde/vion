@@ -1,6 +1,6 @@
 // controllers/feedController.js
 
-const { MOCK_USERS, simulateLatency } = require("../helpers/mockData");
+const { MOCK_USERS, simulateLatency } = require("../helpers/mockdata");
 
 const login = async (req, res) => {
   console.log(`[Controller] Handling login request.`);

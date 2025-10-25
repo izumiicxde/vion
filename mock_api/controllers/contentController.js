@@ -1,6 +1,6 @@
 // controllers/contentController.js
 
-const { mockContents, simulateLatency } = require("../helpers/mockData");
+const { mockContents, simulateLatency } = require("../helpers/mockdata");
 
 const getDashboardSummary = async (req, res) => {
     const targetUserId = req.params.id;
