@@ -3,35 +3,37 @@ const crypto = require("crypto");
 
 const getRequestFingerprint = (req) => {
   let fingerprint = `${req.method}:${req.originalUrl}`;
-  if (req.headers.authorization) fingerprint += `:${req.headers.authorization}`;
+  if (req.headers.authorization) {
+    fingerprint += `:${req.headers.authorization}`;
+  }
   if (
     ["POST", "PUT", "PATCH"].includes(req.method) &&
+    req.body &&
     Object.keys(req.body).length > 0
   ) {
     fingerprint += `:${crypto
-      .createHash("sha26")
+      .createHash("sha256")
       .update(JSON.stringify(req.body))
       .digest("hex")}`;
   }
   return crypto.createHash("sha256").update(fingerprint).digest("hex");
 };
 
-// The new, unified "smart" TTL function
 const getSmartCacheTTL = (req, backendResponse = null) => {
   // --- Stage 1: Absolute Exclusions (Never Cache) ---
   if (["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) return 0;
   if (
     backendResponse &&
-    (backendResponse.status < 200 || backendResponse.status >= 400)
-  )
+    (backendResponse.status < 200 || backendResponse.status >= 500)
+  ) {
+    // Note: We might want to cache 4xx errors, but never 5xx server errors
     return 0;
+  }
 
   // --- Stage 2: High-Priority Path-Based Rules ---
   const path = req.originalUrl.split("?")[0];
-  const statusCode = backendResponse ? backendResponse.status : 200;
-
   if (path === "/api/v1/health") return 1;
-  // if (path.match(/\/api\/v1\/analytics\/report\/[^/]+\/status/)) return 5;
+  if (path.match(/\/api\/v1\/analytics\/report\/[^/]+\/status/)) return 5;
 
   // --- Stage 3: Content-Based Dynamic Rules (only if we have a response) ---
   if (backendResponse) {
