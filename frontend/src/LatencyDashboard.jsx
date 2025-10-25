@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -9,6 +9,7 @@ import {
   Title,
   Tooltip,
   Legend,
+  Filler,
 } from "chart.js";
 
 ChartJS.register(
@@ -18,103 +19,115 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  Filler
 );
 
-const API_URL = "http://localhost:3001/api/v1/health";
+const WEBSOCKET_URL = "ws://localhost:3001";
 
 const LatencyDashboard = () => {
-  const [originalLatencies, setOriginalLatencies] = useState([]);
-  const [cachedLatencies, setCachedLatencies] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [stats, setStats] = useState({
-    cacheHits: 0,
-    cacheMisses: 0,
-    backendCalls: 0,
-    activeRequests: 0,
+    /* initial empty stats */
   });
-
-  const updateLatencyData = (original, cached) => {
-    setOriginalLatencies((prev) => [...prev, original]);
-    setCachedLatencies((prev) => [...prev, cached]);
-  };
-
-  const handleSingleRequest = async () => {
-    setIsProcessing(true);
-    setRequests([{ id: 1, status: "processing" }]);
-    setStats((prev) => ({ ...prev, activeRequests: 1 }));
-
-    const start = performance.now();
-    const res = await fetch(API_URL);
-    const latency = performance.now() - start;
-
-    setRequests([{ id: 1, status: "completed", latency }]);
-    updateLatencyData(latency, latency / 2);
-
-    setStats((prev) => ({
-      cacheHits: prev.cacheHits + 1,
-      backendCalls: prev.backendCalls + 1,
-      activeRequests: 0,
-    }));
-
-    setIsProcessing(false);
-  };
-
-  const handleConcurrentRequests = async () => {
-    setIsProcessing(true);
-    const reqs = Array.from({ length: 5 }, (_, i) => ({
-      id: i + 1,
-      status: "processing",
-    }));
-    setRequests(reqs);
-    setStats((prev) => ({ ...prev, activeRequests: 5 }));
-
-    const responses = await Promise.all(
-      reqs.map(async (r) => {
-        const reqStart = performance.now();
-        await fetch(API_URL);
-        const latency = performance.now() - reqStart;
-        return { ...r, latency, status: "completed" };
-      })
-    );
-
-    const avgLatency =
-      responses.reduce((a, b) => a + b.latency, 0) / responses.length;
-    updateLatencyData(avgLatency * 1.5, avgLatency * 0.5);
-
-    setRequests(responses);
-    setStats((prev) => ({
-      cacheHits: prev.cacheHits + 3,
-      cacheMisses: prev.cacheMisses + 2,
-      backendCalls: prev.backendCalls + 5,
-      activeRequests: 0,
-    }));
-
-    setIsProcessing(false);
-  };
-
-  const chartData = {
-    labels: originalLatencies.map((_, i) => `${i + 1}`),
+  const [chartData, setChartData] = useState({
+    labels: [],
     datasets: [
       {
-        label: "Original Latency (ms)",
-        data: originalLatencies,
-        borderColor: "rgba(59,130,246,0.9)",
-        backgroundColor: "rgba(59,130,246,0.3)",
+        label: "Incoming Requests / sec",
+        data: [],
+        borderColor: "rgba(59, 130, 246, 0.9)",
+        backgroundColor: "rgba(59, 130, 246, 0.2)",
         tension: 0.4,
         fill: true,
       },
       {
-        label: "Cached Latency (ms)",
-        data: cachedLatencies,
-        borderColor: "rgba(34,197,94,0.9)",
-        backgroundColor: "rgba(34,197,94,0.3)",
+        label: "Backend Calls / sec",
+        data: [],
+        borderColor: "rgba(239, 68, 68, 0.9)",
+        backgroundColor: "rgba(239, 68, 68, 0.2)",
         tension: 0.4,
         fill: true,
       },
     ],
-  };
+  });
+
+  const ws = useRef(null);
+  const previousMetrics = useRef(null); // Use a ref to hold previous metrics
+
+  useEffect(() => {
+    ws.current = new WebSocket(WEBSOCKET_URL);
+    ws.current.onopen = () => console.log("WebSocket connection established.");
+    ws.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setStats(data);
+
+      // --- NEW: ONLY UPDATE CHART WHEN THERE IS ACTIVITY ---
+      // Initialize previousMetrics on the first message
+      if (!previousMetrics.current) {
+        previousMetrics.current = {
+          totalRequests: data.totalRequests,
+          backendCalls: data.backendCalls,
+          timestamp: Date.now(),
+        };
+        return; // Don't update the chart on the very first message
+      }
+
+      // If the total number of requests hasn't changed, don't update the chart.
+      if (data.totalRequests === previousMetrics.current.totalRequests) {
+        return;
+      }
+      // --- END OF NEW LOGIC ---
+
+      const now = Date.now();
+      const timeDiffSeconds = (now - previousMetrics.current.timestamp) / 1000;
+
+      if (timeDiffSeconds > 0) {
+        const requestsPerSecond =
+          (data.totalRequests - previousMetrics.current.totalRequests) /
+          timeDiffSeconds;
+        const backendCallsPerSecond =
+          (data.backendCalls - previousMetrics.current.backendCalls) /
+          timeDiffSeconds;
+
+        setChartData((prevData) => {
+          const newLabels = [
+            ...prevData.labels,
+            new Date().toLocaleTimeString(),
+          ];
+          const newIncomingData = [
+            ...prevData.datasets[0].data,
+            requestsPerSecond < 0 ? 0 : requestsPerSecond,
+          ];
+          const newBackendData = [
+            ...prevData.datasets[1].data,
+            backendCallsPerSecond < 0 ? 0 : backendCallsPerSecond,
+          ];
+
+          if (newLabels.length > 30) {
+            newLabels.shift();
+            newIncomingData.shift();
+            newBackendData.shift();
+          }
+
+          return {
+            labels: newLabels,
+            datasets: [
+              { ...prevData.datasets[0], data: newIncomingData },
+              { ...prevData.datasets[1], data: newBackendData },
+            ],
+          };
+        });
+      }
+
+      previousMetrics.current = {
+        totalRequests: data.totalRequests,
+        backendCalls: data.backendCalls,
+        timestamp: now,
+      };
+    };
+
+    return () => ws.current && ws.current.close();
+  }, []);
 
   const chartOptions = {
     responsive: true,
@@ -124,8 +137,15 @@ const LatencyDashboard = () => {
       title: { display: false },
     },
     scales: {
-      x: { ticks: { color: "#ccc" }, grid: { color: "#222" } },
-      y: { ticks: { color: "#ccc" }, grid: { color: "#222" } },
+      x: {
+        ticks: { color: "#ccc" },
+        grid: { color: "rgba(255, 255, 255, 0.1)" },
+      },
+      y: {
+        ticks: { color: "#ccc" },
+        grid: { color: "rgba(255, 255, 255, 0.1)" },
+        beginAtZero: true,
+      },
     },
   };
 
@@ -133,112 +153,100 @@ const LatencyDashboard = () => {
     <div className="min-h-screen min-w-screen bg-[#0d1117] text-gray-100 flex flex-col overflow-hidden m-0 p-0">
       {/* Top Stats Bar */}
       <div className="bg-[#0d1117] py-4 px-6 flex justify-between items-center shadow-md border-b border-gray-800">
-        <h1 className="text-2xl font-semibold text-white">⚡ Smart Caching Proxy</h1>
+        <h1 className="text-2xl font-semibold text-white">
+          ⚡ Smart Concurrency Gateway
+        </h1>
         <div className="flex gap-6 text-sm font-medium">
+          <div className="flex flex-col items-center text-cyan-400">
+            <span className="text-lg font-bold">
+              {stats.totalRequests || 0}
+            </span>
+            Total Requests
+          </div>
           <div className="flex flex-col items-center text-green-400">
-            <span className="text-lg font-bold">{stats.cacheHits}</span>
+            <span className="text-lg font-bold">{stats.cacheHits || 0}</span>
             Cache Hits
           </div>
-          <div className="flex flex-col items-center text-red-400">
-            <span className="text-lg font-bold">{stats.cacheMisses}</span>
-            Cache Misses
-          </div>
           <div className="flex flex-col items-center text-blue-400">
-            <span className="text-lg font-bold">{stats.backendCalls}</span>
+            <span className="text-lg font-bold">{stats.backendCalls || 0}</span>
             Backend Calls
           </div>
+          <div className="flex flex-col items-center text-purple-400">
+            <span className="text-lg font-bold">
+              {stats.deduplicatedRequests || 0}
+            </span>
+            Queued Requests
+          </div>
           <div className="flex flex-col items-center text-yellow-400">
-            <span className="text-lg font-bold">{stats.activeRequests}</span>
-            Active Requests
+            <span className="text-lg font-bold">
+              {stats.inFlightCount || 0}
+            </span>
+            In-Flight (Live)
           </div>
         </div>
       </div>
 
       {/* Main Dashboard */}
-      <div className="flex flex-1 w-full">
-        {/* Left: Chart */}
-        <div className="flex-1 p-4">
-          <div className="bg-[#0d1117] h-full rounded-xl shadow-lg p-4 flex flex-col border border-gray-800">
-            <h2 className="text-xl font-semibold mb-4 text-green-400 flex items-center gap-2">
-              📉 Latency Reduction
-            </h2>
-            <div className="flex-1">
-              <Line data={chartData} options={chartOptions} />
-            </div>
+      <div className="flex flex-1 w-full p-4 gap-4">
+        {/* Left Side: The Live Chart */}
+        <div className="flex-1 bg-[#0d1117] rounded-xl shadow-lg p-4 flex flex-col border border-gray-800">
+          <h2 className="text-xl font-semibold mb-4 text-cyan-400">
+            📊 Live Throughput (Requests/Second)
+          </h2>
+          <div className="flex-1 relative">
+            {chartData.labels.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <p className="text-gray-500 text-lg">
+                  Waiting for load test to begin...
+                </p>
+              </div>
+            )}
+            <Line data={chartData} options={chartOptions} />
           </div>
         </div>
 
-        {/* Right: Request Flow */}
-        <div className="w-[30%] p-4">
-          <div className="bg-[#0d1117] h-full rounded-xl shadow-lg p-4 flex flex-col border border-gray-800">
-            <h2 className="text-xl font-semibold mb-4 text-cyan-400 flex items-center gap-2">
-              🔄 Live Request Flow
-            </h2>
-            <div className="flex items-center justify-around mb-4">
-              <div className="flex flex-col items-center">
-                <div className="text-3xl">👥</div>
-                <span>Clients</span>
-              </div>
-              <div className="text-2xl">➡️</div>
-              <div className="flex flex-col items-center">
-                <div className="text-3xl text-teal-400">🖥️</div>
-                <span>Proxy</span>
-              </div>
-              <div className="text-2xl">➡️</div>
-              <div className="flex flex-col items-center">
-                <div className="text-3xl text-green-400">🗄️</div>
-                <span>Backend</span>
-              </div>
-            </div>
-            <div className="space-y-3 overflow-y-auto flex-1">
-              {requests.length === 0 && (
-                <p className="text-gray-500 text-center">
-                  No active requests yet.
-                </p>
-              )}
-              {requests.map((req) => (
-                <div
-                  key={req.id}
-                  className="flex justify-between items-center bg-[#0d1117] p-2 rounded-md border border-gray-700"
-                >
-                  <span>req-{req.id}</span>
-                  <span
-                    className={`px-3 py-1 rounded-full text-sm ${
-                      req.status === "completed"
-                        ? "bg-green-600"
-                        : "bg-yellow-600 animate-pulse"
-                    }`}
-                  >
-                    {req.status}
+        {/* Right Side: The Live In-Flight Queue */}
+        <div className="w-[40%] bg-[#0d1117] rounded-xl shadow-lg p-4 flex flex-col border border-gray-800">
+          <h2 className="text-xl font-semibold mb-4 text-yellow-400 flex items-center gap-2">
+            🔄 Live In-Flight Queue
+          </h2>
+          <div className="space-y-3 overflow-y-auto flex-1">
+            {(stats.inFlightDetails || []).length === 0 && (
+              <p className="text-gray-500 text-center pt-8">
+                The queue is empty.
+              </p>
+            )}
+            {(stats.inFlightDetails || []).map((req, index) => (
+              <div
+                key={index}
+                className="flex justify-between items-center bg-[#0d1117] p-3 rounded-md border border-gray-700 animate-pulse"
+              >
+                <span className="font-mono text-sm text-gray-300">
+                  {req.url}
+                </span>
+                <div className="flex items-center gap-4">
+                  <span className="px-3 py-1 rounded-full text-xs bg-purple-600">
+                    Queued: {req.queued_requests}
                   </span>
-                  {req.latency && (
-                    <span className="text-gray-400">
-                      {req.latency.toFixed(2)} ms
-                    </span>
-                  )}
+                  <span className="text-gray-400 text-sm w-24 text-right">
+                    {req.duration_ms.toFixed(0)} ms
+                  </span>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
       {/* Bottom Controls */}
-      <div className="bg-[#0d1117] py-3 flex justify-center gap-4 shadow-inner border-t border-gray-800">
-        <button
-          onClick={handleSingleRequest}
-          disabled={isProcessing}
-          className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50"
-        >
-          Test Single Request
-        </button>
-        <button
-          onClick={handleConcurrentRequests}
-          disabled={isProcessing}
-          className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50"
-        >
-          Test 5 Concurrent Requests
-        </button>
+      <div className="bg-[#0d1117] py-3 flex justify-center items-center gap-4 shadow-inner border-t border-gray-800">
+        <p className="text-gray-400">
+          Run a load test in your terminal to see the live data:
+        </p>
+        <code className="bg-gray-900 text-green-400 px-3 py-1 rounded">
+          autocannon -c 100 -d 10
+          http://localhost:3001/api/v1/feed/global-trending
+        </code>
       </div>
     </div>
   );
