@@ -20,10 +20,7 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
           // --- ROBUST DISTRIBUTED BATCH LOGIC ---
           const counterKey = `count:cache:${fingerprint}`;
           const loggingLockKey = `lock:log:${fingerprint}`;
-
-          await redis.incr(counterKey); // Atomically increment the counter
-
-          // Try to acquire a "logging lock". Only one process will succeed.
+          await redis.incr(counterKey);
           const isLogger = await redis.set(
             loggingLockKey,
             "logging",
@@ -31,25 +28,22 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
             5,
             "NX"
           );
-
           if (isLogger) {
-            // This instance is the designated logger for this batch.
             setTimeout(async () => {
               const finalCount = await redis.get(counterKey);
               if (finalCount && finalCount > 0) {
                 console.log(
                   `[CACHE HIT SUMMARY] ${finalCount}x concurrent requests for ${req.originalUrl} were served from cache.`
                 );
-                // Clean up BOTH keys. Releasing the lock allows a new batch to start.
                 redis.del(counterKey, loggingLockKey);
               }
-            }, 500); // Use a slightly longer window to ensure the whole batch is captured.
+            }, 500);
           }
           // --- END OF BATCH LOGIC ---
 
           res.set(parsed.headers).status(parsed.status).send(parsed.data);
           metrics.successfulResponses++;
-          broadcastMetrics(metrics);
+          broadcastMetrics();
           return;
         }
       } catch (e) {
@@ -67,9 +61,6 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       metrics.deduplicatedRequests++;
       await redis.incr(counterKey);
       redis.expire(counterKey, 20);
-
-      // This log is fine, as it's useful for debugging individual requests.
-      // console.log(`[IN-FLIGHT] Lock busy. Polling cache for ${req.originalUrl}`);
       try {
         for (let i = 0; i < 15; i++) {
           await new Promise((resolve) => setTimeout(resolve, 300));
@@ -78,7 +69,7 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
             const parsed = JSON.parse(cached);
             res.set(parsed.headers).status(parsed.status).send(parsed.data);
             metrics.successfulResponses++;
-            broadcastMetrics(metrics);
+            broadcastMetrics();
             return;
           }
         }
@@ -89,7 +80,7 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
           .status(504)
           .json({ error: "Request timed out waiting for in-flight response." });
         metrics.errorResponses++;
-        broadcastMetrics(metrics);
+        broadcastMetrics();
         return;
       }
     }
@@ -103,16 +94,26 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       `[LEADER] Acquired lock for ${req.originalUrl}. Forwarding to backend.`
     );
     try {
-      const backendResponse = await axios({
-        method: req.method,
-        url: backendUrl,
-        headers: req.headers,
-        data: req.body,
-        validateStatus: () => true,
-        responseType: "arraybuffer",
+      // Create a timeout promise that will reject after 15 seconds.
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Request timed out after 15 seconds`));
+        }, 15000);
       });
 
-      // ... processing logic ...
+      // Race the actual backend request against our timeout.
+      const backendResponse = await Promise.race([
+        axios({
+          method: req.method,
+          url: backendUrl,
+          headers: req.headers,
+          data: req.body,
+          validateStatus: () => true,
+          responseType: "arraybuffer",
+        }),
+        timeoutPromise,
+      ]);
+
       let responseData = backendResponse.data;
       const contentType = backendResponse.headers["content-type"];
       if (
@@ -144,12 +145,12 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       metrics.successfulResponses++;
     } catch (error) {
       console.error(
-        `[BACKEND ERROR] Leader failed for ${req.originalUrl}:`,
+        `[BACKEND ERROR OR TIMEOUT] Leader failed for ${req.originalUrl}:`,
         error.message
       );
       res
-        .status(502)
-        .json({ message: "Backend error", details: error.message });
+        .status(504)
+        .json({ message: "Gateway Timeout", details: error.message });
       metrics.errorResponses++;
     } finally {
       const finalCount = await redis.get(counterKey);
@@ -160,7 +161,7 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       }
       await redis.del(lockKey, counterKey);
       console.log(`[LOCK RELEASED] for ${req.originalUrl}`);
-      broadcastMetrics(metrics);
+      broadcastMetrics();
     }
   };
 }
