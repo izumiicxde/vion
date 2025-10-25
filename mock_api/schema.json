@@ -1,0 +1,169 @@
+{
+  "get_health": {
+    "status": "healthy",
+    "timestamp": "2025-10-25T14:15:00.123Z",
+    "source": "Mock Backend (Root)"
+  },
+  "post_auth_login": {
+    "message": "Login successful",
+    "token": "mock_admin_jwt",
+    "user": {
+      "id": "a1",
+      "username": "admin1",
+      "role": "admin"
+    }
+  },
+  "get_feed_global_trending": {
+    "timestamp": "2025-10-25T14:16:00.456Z",
+    "topics": [
+      {
+        "topic": "#AIRevolution",
+        "volume": 450123
+      },
+      {
+        "topic": "#GreenEnergy",
+        "volume": 210987
+      },
+      {
+        "topic": "#FutureOfWork",
+        "volume": 180555
+      }
+    ],
+    "source": "Mock External Service"
+  },
+  "get_user_dashboard_summary": {
+    "timestamp": "2025-10-25T14:17:00.789Z",
+    "userId": "u1",
+    "username": "user1",
+    "role": "user",
+    "summary": {
+      "articlesPublished": 5,
+      "totalViews": 12345,
+      "totalLikes": 678,
+      "recentActivity": "Last updated 2:10:05 PM",
+      "recommendedTopics": [
+        "AI",
+        "Data Science",
+        "Blockchain"
+      ]
+    },
+    "source": "Content Controller Aggregation"
+  },
+  "get_content_full_detail": {
+    "id": 1,
+    "title": "Standard Article 1",
+    "author": "Author 3",
+    "html_body": "<div>Lorem ipsum dolor sit amet, consectetur adipiscing elit...</div>",
+    "accessedBy": "user1",
+    "version": "v1",
+    "source": "Content Controller Content Service"
+  },
+  "get_search_advanced": {
+    "timestamp": "2025-10-25T14:18:00.000Z",
+    "query": {
+      "q": "tech",
+      "tags": "popular",
+      "page": "1"
+    },
+    "count": 15,
+    "page": 1,
+    "limit": 10,
+    "results": [
+      {
+        "id": 1,
+        "title": "Standard Article 1",
+        "author": "Author 3",
+        "views": 450,
+        "summary": "Summary of article 1...",
+        "comments_count": 5,
+        "likes": 22,
+        "tags": "tech",
+        "createdAt": "2025-10-01T12:00:00.000Z",
+        "last_updated": "2025-10-25T08:00:00.000Z"
+      },
+      {
+        "id": 2,
+        "title": "Standard Article 2",
+        "author": "Author 1",
+        "views": 890,
+        "summary": "Summary of article 2...",
+        "comments_count": 12,
+        "likes": 75,
+        "tags": "news",
+        "createdAt": "2025-10-03T15:30:00.000Z",
+        "last_updated": "2025-10-24T11:00:00.000Z"
+      }
+    ],
+    "source": "Content Controller Search Service"
+  },
+  "post_content_comment": {
+    "status": "success",
+    "contentId": 1,
+    "newCommentsCount": 6,
+    "message": "Comment added by user1.",
+    "source": "Content Controller"
+  },
+  "put_content_update": {
+    "status": "success",
+    "contentId": 1,
+    "updatedAt": "2025-10-25T14:20:00.123Z",
+    "message": "Content 1 updated successfully.",
+    "source": "Content Controller"
+  },
+  "get_analytics_content_performance": {
+    "timestamp": "2025-10-25T14:21:00.456Z",
+    "query": {
+      "tag": "tech"
+    },
+    "metrics": {
+      "totalContent": 15,
+      "totalViews": 8500,
+      "totalLikes": 750,
+      "avgLikesPerContent": 50,
+      "uniqueAuthors": 4,
+      "topTags": [
+        "tech",
+        "news",
+        "popular"
+      ]
+    },
+    "source": "Analytics Controller Aggregation Service"
+  },
+  "get_analytics_user_engagement_trends": {
+    "timestamp": "2025-10-25T14:22:00.789Z",
+    "title": "DAU Daily Trends",
+    "period": "daily",
+    "metric": "dau",
+    "data": [
+      {
+        "date": "2025-10-24",
+        "value": 980
+      },
+      {
+        "date": "2025-10-25",
+        "value": 1010
+      }
+    ],
+    "source": "Analytics Controller Time-Series Service"
+  },
+  "post_analytics_generate_report": {
+    "message": "Report generation started successfully",
+    "job_id": "report-1698223800000-abcdef",
+    "status": "queued",
+    "source": "Analytics Controller Job Service"
+  },
+  "get_analytics_report_status": {
+    "job_id": "report-1698223800000-abcdef",
+    "status": "processing",
+    "progress": 80,
+    "requestedBy": "analyst1",
+    "createdAt": "2025-10-25T14:23:00.000Z",
+    "completedAt": null,
+    "source": "Analytics Controller Job Service"
+  },
+  "get_analytics_report_download": {
+    "_comment": "This endpoint returns a raw 'text/csv' file, not JSON. The data below is a string representation of that CSV.",
+    "response_type": "text/csv",
+    "example_data": "id,title,author,views,likes,comments,tags,createdAt\n1,Standard Article 1,Author 3,450,22,6,tech,2025-10-01T...\n2,Standard Article 2,Author 1,890,75,12,news,2025-10-03T..."
+  }
+}
