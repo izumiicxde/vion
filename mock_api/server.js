@@ -1,4 +1,5 @@
 const express = require("express");
+const cors=require("cors");
 const { authMiddleware } = require("./middleware/auth");
 const { simulateLatency } = require("./helpers/mockdata");
 
@@ -15,6 +16,7 @@ const API_VERSION = "/api/v1";
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(authMiddleware);
+app.use(cors());
 
 // --- API Endpoints ---
 

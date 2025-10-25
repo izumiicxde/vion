@@ -20,7 +20,7 @@ const generateTrendData = (count, baseValue, variability, id_seed = "") => {
 // --- Analytics Endpoints ---
 const getContentPerformance = async (req, res) => {
     const { tag } = req.query;
-    await simulateLatency(1500, 3500);
+    await simulateLatency(500, 1000);
 
     let filteredContents = Object.values(mockContents);
     if (tag) {

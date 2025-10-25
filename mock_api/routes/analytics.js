@@ -29,5 +29,6 @@ router.post("/generate-report", isAuthorized(["admin", "analyst"]), generateRepo
 router.get("/report/:job_id/status", isAuthenticated, canAccessJob, getReportStatus);
 router.get("/report/:job_id/download", isAuthenticated, canAccessJob, downloadReport);
 router.get("/report/download-csv", isAuthenticated, sendCSVReport);
+// server.js or routes file
 
 module.exports = router;
