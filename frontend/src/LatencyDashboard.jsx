@@ -1,7 +1,5 @@
 import React, { useState } from "react";
-import {
-  Line
-} from "react-chartjs-2";
+import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -116,9 +114,9 @@ const LatencyDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-gray-100 p-8">
+    <div className="max-h-screen bg-[#0d1117] text-gray-100 p-8">
       <h1 className="text-3xl font-semibold text-center mb-6">
-        Smart Caching Proxy – Latency Visualization
+        Smart Caching Proxy - Latency Visualization
       </h1>
 
       {/* Buttons */}

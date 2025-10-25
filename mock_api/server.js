@@ -1,5 +1,5 @@
 const express = require("express");
-const cors=require("cors");
+const cors = require("cors");
 const { authMiddleware } = require("./middleware/auth");
 const { simulateLatency } = require("./helpers/mockdata");
 
@@ -22,7 +22,6 @@ app.use(cors());
 
 // 0. GET /api/v1/health - Very fast health check
 app.get(`${API_VERSION}/health`, async (req, res) => {
-
   console.log(`[Backend][${req.user.username}] Received GET /health.`);
   await simulateLatency(30, 80);
   res.json({
