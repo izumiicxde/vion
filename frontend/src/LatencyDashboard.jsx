@@ -27,7 +27,12 @@ const WEBSOCKET_URL = "ws://localhost:3001";
 
 const LatencyDashboard = () => {
   const [stats, setStats] = useState({
-    /* initial empty stats */
+    totalRequests: 0,
+    cacheHits: 0,
+    backendCalls: 0,
+    deduplicatedRequests: 0,
+    inFlightCount: 0,
+    inFlightDetails: [],
   });
   const [chartData, setChartData] = useState({
     labels: [],
@@ -61,7 +66,6 @@ const LatencyDashboard = () => {
       const data = JSON.parse(event.data);
       setStats(data);
 
-      // --- NEW: ONLY UPDATE CHART WHEN THERE IS ACTIVITY ---
       // Initialize previousMetrics on the first message
       if (!previousMetrics.current) {
         previousMetrics.current = {
@@ -76,11 +80,11 @@ const LatencyDashboard = () => {
       if (data.totalRequests === previousMetrics.current.totalRequests) {
         return;
       }
-      // --- END OF NEW LOGIC ---
 
       const now = Date.now();
       const timeDiffSeconds = (now - previousMetrics.current.timestamp) / 1000;
 
+      // Only update if a meaningful amount of time has passed
       if (timeDiffSeconds > 0) {
         const requestsPerSecond =
           (data.totalRequests - previousMetrics.current.totalRequests) /
@@ -103,6 +107,7 @@ const LatencyDashboard = () => {
             backendCallsPerSecond < 0 ? 0 : backendCallsPerSecond,
           ];
 
+          // Keep the chart to a fixed number of data points
           if (newLabels.length > 30) {
             newLabels.shift();
             newIncomingData.shift();
@@ -117,16 +122,21 @@ const LatencyDashboard = () => {
             ],
           };
         });
-      }
 
-      previousMetrics.current = {
-        totalRequests: data.totalRequests,
-        backendCalls: data.backendCalls,
-        timestamp: now,
-      };
+        // *** THE FIX: Update previousMetrics ONLY after a successful calculation ***
+        previousMetrics.current = {
+          totalRequests: data.totalRequests,
+          backendCalls: data.backendCalls,
+          timestamp: now,
+        };
+      }
     };
 
-    return () => ws.current && ws.current.close();
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
   }, []);
 
   const chartOptions = {
