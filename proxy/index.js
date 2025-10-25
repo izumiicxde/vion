@@ -118,7 +118,7 @@ const getCacheTTL = (req, statusCode) => {
 };
 
 // --- PROXY MIDDLEWARE ---
-app.all("/api/:action", async (req, res) => {
+app.all("/api/*", async (req, res) => {
   totalRequests++;
   lastHourRequests++;
   const requestStartTime = process.hrtime.bigint();
