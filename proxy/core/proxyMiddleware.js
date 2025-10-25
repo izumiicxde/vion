@@ -1,69 +1,44 @@
 // core/proxyMiddleware.js
 const axios = require("axios");
-const crypto = require("crypto");
+const { getRequestFingerprint, getSmartCacheTTL } = require("./utils"); // Import from our new file
 
 const inFlight = new Map();
-
-const metrics = {
-  totalRequests: 0,
-  backendCalls: 0,
-  cacheHits: 0,
-  deduplicatedRequests: 0,
-  totalLatencySaved: 0,
-  successfulResponses: 0,
-  errorResponses: 0,
-};
-
-const getRequestFingerprint = (req) => {
-  let fingerprint = `${req.method}:${req.originalUrl}`;
-  if (req.headers.authorization) fingerprint += `:${req.headers.authorization}`;
-  if (["POST", "PUT", "PATCH"].includes(req.method) && Object.keys(req.body).length > 0) {
-    fingerprint += `:${crypto
-      .createHash("sha256")
-      .update(JSON.stringify(req.body))
-      .digest("hex")}`;
-  }
-  return crypto.createHash("sha256").update(fingerprint).digest("hex");
-};
-
-const getCacheTTL = (req) => {
-  if (req.method !== "GET") return 0;
-  if (req.originalUrl.includes("trending")) return 5;
-  return 15;
-};
 
 function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
   return async (req, res) => {
     metrics.totalRequests++;
-    const startTime = process.hrtime.bigint();
-
-    const fingerprint = getRequestFingerprint(req);
     const backendUrl = `http://localhost:${backendPort}${req.originalUrl}`;
+    const fingerprint = getRequestFingerprint(req);
 
-    // 1️⃣ Try Redis cache
-    const ttl = getCacheTTL(req);
-    if (req.method === "GET" && ttl > 0) {
-      const cached = await redis.get(fingerprint);
-      if (cached) {
-        metrics.cacheHits++;
-        const parsed = JSON.parse(cached);
-        console.log(`[CACHE HIT] ${req.originalUrl}`);
-        for (const header in parsed.headers) res.setHeader(header, parsed.headers[header]);
-        res.status(parsed.status).send(parsed.data);
-        metrics.successfulResponses++;
-        broadcastMetrics(metrics);
-        return;
+    // --- Stage 1: Initial Cache Check ---
+    // We call getSmartCacheTTL WITHOUT a response to see if this path is EVER cacheable.
+    const initialTTL = getSmartCacheTTL(req);
+    if (req.method === "GET" && initialTTL > 0) {
+      try {
+        const cached = await redis.get(fingerprint);
+        if (cached) {
+          metrics.cacheHits++;
+          const parsed = JSON.parse(cached);
+          console.log(`[CACHE HIT] ${req.originalUrl}`);
+          res.set(parsed.headers); // Use res.set to apply all headers at once
+          res.status(parsed.status).send(parsed.data);
+          metrics.successfulResponses++;
+          broadcastMetrics(metrics);
+          return;
+        }
+      } catch (e) {
+        console.error("[CACHE READ ERROR]", e);
       }
     }
 
-    // 2️⃣ Check in-flight requests
+    // --- Stage 2: In-Flight Request Deduplication ---
     if (inFlight.has(fingerprint)) {
       metrics.deduplicatedRequests++;
-      console.log(`[IN-FLIGHT] Queuing identical request for ${req.originalUrl}`);
-      const { promise } = inFlight.get(fingerprint);
+      console.log(`[IN-FLIGHT] Queuing request for ${req.originalUrl}`);
       try {
-        const backendResponse = await promise;
-        res.status(backendResponse.status).send(backendResponse.data);
+        const sharedResponse = await inFlight.get(fingerprint);
+        res.set(sharedResponse.headers);
+        res.status(sharedResponse.status).send(sharedResponse.data);
         metrics.successfulResponses++;
         broadcastMetrics(metrics);
         return;
@@ -74,50 +49,73 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       }
     }
 
-    // 3️⃣ Forward to backend
+    // --- Stage 3: Forward to Backend ---
     metrics.backendCalls++;
-    let resolveInFlight, rejectInFlight;
-    const p = new Promise((resolve, reject) => {
-      resolveInFlight = resolve;
-      rejectInFlight = reject;
+    const requestPromise = new Promise(async (resolve, reject) => {
+      try {
+        const backendResponse = await axios({
+          method: req.method,
+          url: backendUrl,
+          headers: req.headers,
+          data: req.body,
+          validateStatus: () => true, // Handle all status codes
+          responseType: "arraybuffer",
+        });
+
+        let responseData = backendResponse.data;
+        const contentType = backendResponse.headers["content-type"];
+        if (
+          contentType &&
+          (contentType.includes("application/json") ||
+            contentType.includes("text/"))
+        ) {
+          responseData = backendResponse.data.toString("utf8");
+        }
+
+        const sharedResponse = {
+          status: backendResponse.status,
+          headers: backendResponse.headers,
+          data: responseData,
+        };
+
+        // --- DYNAMIC CACHING LOGIC ---
+        // NEW: Calculate the FINAL TTL now that we have the response.
+        const dynamicTTL = getSmartCacheTTL(req, backendResponse);
+
+        if (dynamicTTL > 0) {
+          await redis.setex(
+            fingerprint,
+            dynamicTTL,
+            JSON.stringify(sharedResponse)
+          );
+          console.log(
+            `[CACHED] Response for ${req.originalUrl} with Smart TTL: ${dynamicTTL}s`
+          );
+        }
+
+        resolve(sharedResponse);
+      } catch (error) {
+        reject(error);
+      }
     });
-    inFlight.set(fingerprint, { promise: p });
+
+    inFlight.set(fingerprint, requestPromise);
 
     try {
-      const backendResponse = await axios({
-        method: req.method,
-        url: backendUrl,
-        headers: req.headers,
-        data: req.body,
-      });
-
-      // Cache response
-      if (req.method === "GET" && ttl > 0 && backendResponse.status < 400) {
-        await redis.setex(
-          fingerprint,
-          ttl,
-          JSON.stringify({
-            status: backendResponse.status,
-            headers: backendResponse.headers,
-            data: backendResponse.data,
-          })
-        );
-      }
-
-      resolveInFlight(backendResponse);
-      inFlight.delete(fingerprint);
-
-      res.status(backendResponse.status).send(backendResponse.data);
+      const finalResponse = await requestPromise;
+      res.set(finalResponse.headers);
+      res.status(finalResponse.status).send(finalResponse.data);
       metrics.successfulResponses++;
-      broadcastMetrics(metrics);
     } catch (error) {
-      rejectInFlight(error);
-      inFlight.delete(fingerprint);
-      res.status(500).json({ message: "Backend error", details: error.message });
+      res
+        .status(502)
+        .json({ message: "Backend error", details: error.message });
       metrics.errorResponses++;
+    } finally {
+      inFlight.delete(fingerprint);
       broadcastMetrics(metrics);
     }
   };
 }
 
-module.exports = { proxyMiddleware, metrics };
+module.exports = { proxyMiddleware };
