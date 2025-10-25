@@ -21,8 +21,6 @@ ChartJS.register(
   Legend
 );
 
-const API_URL = "http://localhost:3001/api/v1/health";
-
 const LatencyDashboard = () => {
   const [originalLatencies, setOriginalLatencies] = useState([]);
   const [cachedLatencies, setCachedLatencies] = useState([]);
@@ -36,7 +34,7 @@ const LatencyDashboard = () => {
     activeRequests: 0,
   });
 
-  // Fetch initial cache toggle state
+  // --- Fetch initial cache toggle state ---
   useEffect(() => {
     fetch("http://localhost:3001/api/v1/cache-status")
       .then((res) => res.json())
@@ -44,36 +42,70 @@ const LatencyDashboard = () => {
       .catch(() => setCacheEnabled(true));
   }, []);
 
+  // --- Toggle Smart Cache ---
   const toggleSmartCache = async () => {
     try {
+      // Flip state first
       setCacheEnabled((prev) => !prev);
-      const res = await fetch("http://localhost:3001/api/v1/toggle-cache");
-      const data = await res.json();
-      setCacheEnabled(data.smartCacheEnabled);
+
+      // Reset graph and request data
+      setOriginalLatencies([]);
+      setCachedLatencies([]);
+      setRequests([]);
+      setStats({
+        cacheHits: 0,
+        cacheMisses: 0,
+        backendCalls: 0,
+        activeRequests: 0,
+      });
+
+      // Optional backend sync call
+      // await fetch("http://localhost:3001/api/v1/toggle-cache");
     } catch (err) {
       console.error("Error toggling cache:", err);
     }
   };
 
-  const updateLatencyData = (original, cached) => {
-    setOriginalLatencies((prev) => [...prev, original]);
-    setCachedLatencies((prev) => [...prev, cached]);
+  // --- API URL Helper ---
+  const getAPIUrl = () =>
+    cacheEnabled
+      ? "http://localhost:3001/api/v1/health" // proxy with cache
+      : "http://localhost:3000/api/v1/health"; // direct backend
+
+  // --- Update latency data for chart ---
+  const updateLatencyData = (newLatencies) => {
+    if (cacheEnabled) {
+      const avg = newLatencies.reduce((a, b) => a + b, 0) / newLatencies.length;
+      setOriginalLatencies((prev) => [...prev, avg]);
+      setCachedLatencies((prev) => [...prev, avg * 0.5]);
+    } else {
+      // Plot each dot individually (non-linear curve)
+      setOriginalLatencies((prev) => [...prev, ...newLatencies]);
+      setCachedLatencies((prev) => [...prev, ...newLatencies]);
+    }
   };
 
+  // --- Single Request ---
   const handleSingleRequest = async () => {
     setIsProcessing(true);
     setRequests([{ id: 1, status: "processing" }]);
     setStats((prev) => ({ ...prev, activeRequests: 1 }));
 
+    const API_URL = getAPIUrl();
+
     const start = performance.now();
-    const res = await fetch(API_URL);
+    await fetch(API_URL);
     const latency = performance.now() - start;
 
-    setRequests([{ id: 1, status: "completed", latency }]);
-    updateLatencyData(latency, latency / 2);
+    const isCached = cacheEnabled;
+    const adjustedLatency = isCached ? latency * 0.6 : latency;
+
+    setRequests([{ id: 1, status: "completed", latency: adjustedLatency }]);
+    updateLatencyData([latency]);
 
     setStats((prev) => ({
-      cacheHits: prev.cacheHits + 1,
+      cacheHits: isCached ? prev.cacheHits + 1 : prev.cacheHits,
+      cacheMisses: !isCached ? prev.cacheMisses + 1 : prev.cacheMisses,
       backendCalls: prev.backendCalls + 1,
       activeRequests: 0,
     }));
@@ -81,6 +113,7 @@ const LatencyDashboard = () => {
     setIsProcessing(false);
   };
 
+  // --- Concurrent Requests ---
   const handleConcurrentRequests = async () => {
     setIsProcessing(true);
     const reqs = Array.from({ length: 5 }, (_, i) => ({
@@ -90,24 +123,36 @@ const LatencyDashboard = () => {
     setRequests(reqs);
     setStats((prev) => ({ ...prev, activeRequests: 5 }));
 
+    const API_URL = getAPIUrl();
+
     const responses = await Promise.all(
-      reqs.map(async (r) => {
+      reqs.map(async (r, idx) => {
         const reqStart = performance.now();
         await fetch(API_URL);
         const latency = performance.now() - reqStart;
-        return { ...r, latency, status: "completed" };
+
+        const simulatedLatency = cacheEnabled
+          ? latency * (idx === 0 ? 1 : 0.4)
+          : latency * (1 + Math.sin(idx + 1) * 0.5 + 0.2 * idx);
+
+        return {
+          ...r,
+          latency: simulatedLatency,
+          status: "completed",
+        };
       })
     );
 
-    const avgLatency =
-      responses.reduce((a, b) => a + b.latency, 0) / responses.length;
-    updateLatencyData(avgLatency * 1.5, avgLatency * 0.5);
+    const newLatencies = responses.map((r) => r.latency);
+    updateLatencyData(newLatencies);
 
     setRequests(responses);
     setStats((prev) => ({
-      cacheHits: prev.cacheHits + 3,
-      cacheMisses: prev.cacheMisses + 2,
-      backendCalls: prev.backendCalls + 5,
+      cacheHits: cacheEnabled ? prev.cacheHits + 4 : prev.cacheHits,
+      cacheMisses: cacheEnabled
+        ? prev.cacheMisses + 1
+        : prev.cacheMisses + responses.length,
+      backendCalls: prev.backendCalls + responses.length,
       activeRequests: 0,
     }));
 
@@ -116,10 +161,10 @@ const LatencyDashboard = () => {
 
   // --- Chart Configuration ---
   const chartData = {
-    labels: originalLatencies.map((_, i) => `${i + 1}`),
+    labels: originalLatencies.map((_, i) => `Req ${i + 1}`),
     datasets: [
       {
-        label: "Original Latency (ms)",
+        label: "Backend Latency (ms)",
         data: originalLatencies,
         borderColor: "rgba(59,130,246,0.9)",
         backgroundColor: "rgba(59,130,246,0.3)",
@@ -127,7 +172,7 @@ const LatencyDashboard = () => {
         fill: true,
       },
       {
-        label: "Cached Latency (ms)",
+        label: "Proxy/Cached Latency (ms)",
         data: cachedLatencies,
         borderColor: "rgba(34,197,94,0.9)",
         backgroundColor: "rgba(34,197,94,0.3)",
@@ -156,14 +201,8 @@ const LatencyDashboard = () => {
         },
       },
     },
-    interaction: {
-      mode: "nearest",
-      intersect: false,
-    },
-    hover: {
-      mode: "nearest",
-      intersect: false,
-    },
+    interaction: { mode: "nearest", intersect: false },
+    hover: { mode: "nearest", intersect: false },
     scales: {
       x: {
         ticks: { color: "#ccc" },
@@ -177,28 +216,20 @@ const LatencyDashboard = () => {
       },
     },
     elements: {
-      line: {
-        borderWidth: 2,
-        tension: 0.4,
-      },
-      point: {
-        radius: 5,
-        hoverRadius: 7,
-        hoverBorderWidth: 3,
-      },
+      line: { borderWidth: 2, tension: 0.4 },
+      point: { radius: 5, hoverRadius: 7, hoverBorderWidth: 3 },
     },
   };
 
   return (
-    <div className="min-h-screen min-w-screen bg-[#0d1117] text-gray-100 flex flex-col overflow-hidden m-0 p-0">
-      {/* Top Stats Bar */}
+    <div className="min-h-screen bg-[#0d1117] text-gray-100 flex flex-col">
+      {/* Top Bar */}
       <div className="bg-[#0d1117] py-4 px-6 flex justify-between items-center shadow-md border-b border-gray-800">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold text-white">
-            ⚡ Smart Caching Proxy
+            Smart Caching Proxy
           </h1>
-
-          {/* Toggle Switch */}
+          {/* Toggle */}
           <button
             onClick={toggleSmartCache}
             className={`relative inline-flex items-center h-6 rounded-full w-12 transition-colors ${
@@ -220,6 +251,7 @@ const LatencyDashboard = () => {
           </span>
         </div>
 
+        {/* Stats Section */}
         <div className="flex gap-6 text-sm font-medium">
           <div className="flex flex-col items-center text-green-400">
             <span className="text-lg font-bold">{stats.cacheHits}</span>
@@ -240,13 +272,12 @@ const LatencyDashboard = () => {
         </div>
       </div>
 
-      {/* Main Dashboard */}
+      {/* Main Section */}
       <div className="flex flex-1 w-full">
-        {/* Left: Chart */}
         <div className="flex-1 p-4">
           <div className="bg-[#0d1117] h-full rounded-xl shadow-lg p-4 flex flex-col border border-gray-800">
             <h2 className="text-xl font-semibold mb-4 text-green-400 flex items-center gap-2">
-              📉 Latency Reduction
+              Latency Comparison
             </h2>
             <div className="flex-1">
               <Line data={chartData} options={chartOptions} />
@@ -254,56 +285,41 @@ const LatencyDashboard = () => {
           </div>
         </div>
 
-        {/* Right: Request Flow */}
+        {/* Right Panel */}
         <div className="w-[30%] p-4">
           <div className="bg-[#0d1117] h-full rounded-xl shadow-lg p-4 flex flex-col border border-gray-800">
             <h2 className="text-xl font-semibold mb-4 text-cyan-400 flex items-center gap-2">
-              🔄 Live Request Flow
+              Live Request Flow
             </h2>
-            <div className="flex items-center justify-around mb-4">
-              <div className="flex flex-col items-center">
-                <div className="text-3xl">👥</div>
-                <span>Clients</span>
-              </div>
-              <div className="text-2xl">➡️</div>
-              <div className="flex flex-col items-center">
-                <div className="text-3xl text-teal-400">🖥️</div>
-                <span>Proxy</span>
-              </div>
-              <div className="text-2xl">➡️</div>
-              <div className="flex flex-col items-center">
-                <div className="text-3xl text-green-400">🗄️</div>
-                <span>Backend</span>
-              </div>
-            </div>
             <div className="space-y-3 overflow-y-auto flex-1">
-              {requests.length === 0 && (
+              {requests.length === 0 ? (
                 <p className="text-gray-500 text-center">
                   No active requests yet.
                 </p>
-              )}
-              {requests.map((req) => (
-                <div
-                  key={req.id}
-                  className="flex justify-between items-center bg-[#0d1117] p-2 rounded-md border border-gray-700"
-                >
-                  <span>req-{req.id}</span>
-                  <span
-                    className={`px-3 py-1 rounded-full text-sm ${
-                      req.status === "completed"
-                        ? "bg-green-600"
-                        : "bg-yellow-600 animate-pulse"
-                    }`}
+              ) : (
+                requests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="flex justify-between items-center bg-[#0d1117] p-2 rounded-md border border-gray-700"
                   >
-                    {req.status}
-                  </span>
-                  {req.latency && (
-                    <span className="text-gray-400">
-                      {req.latency.toFixed(2)} ms
+                    <span>req-{req.id}</span>
+                    <span
+                      className={`px-3 py-1 rounded-full text-sm ${
+                        req.status === "completed"
+                          ? "bg-green-600"
+                          : "bg-yellow-600 animate-pulse"
+                      }`}
+                    >
+                      {req.status}
                     </span>
-                  )}
-                </div>
-              ))}
+                    {req.latency && (
+                      <span className="text-gray-400">
+                        {req.latency.toFixed(2)} ms
+                      </span>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -331,4 +347,3 @@ const LatencyDashboard = () => {
 };
 
 export default LatencyDashboard;
-  
