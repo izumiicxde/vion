@@ -8,7 +8,7 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
     const backendUrl = `http://localhost:${backendPort}${req.originalUrl}`;
     const fingerprint = getRequestFingerprint(req);
 
-    // --- Stage 1: Cache Check with Distributed Counting & Logging Lock ---
+    // --- Stage 1: Cache Check (No changes here) ---
     const initialTTL = getSmartCacheTTL(req);
     if (req.method === "GET" && initialTTL > 0) {
       try {
@@ -16,8 +16,6 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
         if (cached) {
           metrics.cacheHits++;
           const parsed = JSON.parse(cached);
-
-          // --- ROBUST DISTRIBUTED BATCH LOGIC ---
           const counterKey = `count:cache:${fingerprint}`;
           const loggingLockKey = `lock:log:${fingerprint}`;
           await redis.incr(counterKey);
@@ -39,8 +37,6 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
               }
             }, 500);
           }
-          // --- END OF BATCH LOGIC ---
-
           res.set(parsed.headers).status(parsed.status).send(parsed.data);
           metrics.successfulResponses++;
           broadcastMetrics();
@@ -51,13 +47,20 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       }
     }
 
-    // --- Stage 2: Distributed Lock with Queue Counting ---
+    // --- Stage 2: Distributed Lock (The change is in the LEADER part) ---
     const lockKey = `lock:queue:${fingerprint}`;
     const counterKey = `count:queue:${fingerprint}`;
-    const lockAcquired = await redis.set(lockKey, "locked", "EX", 20, "NX");
+
+    // <<< NEW: Prepare the metadata payload BEFORE trying to acquire the lock
+    const lockPayload = JSON.stringify({
+      url: req.originalUrl,
+      startTime: Date.now(),
+    });
+
+    const lockAcquired = await redis.set(lockKey, lockPayload, "EX", 20, "NX");
 
     if (!lockAcquired) {
-      // --- FOLLOWER LOGIC ---
+      // --- FOLLOWER LOGIC (No changes here) ---
       metrics.deduplicatedRequests++;
       await redis.incr(counterKey);
       redis.expire(counterKey, 20);
@@ -85,7 +88,7 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       }
     }
 
-    // --- LEADER LOGIC ---
+    // --- LEADER LOGIC (This is where the 'lockPayload' is now used) ---
     metrics.backendCalls++;
     await redis.incr(counterKey);
     redis.expire(counterKey, 20);
@@ -94,14 +97,12 @@ function proxyMiddleware(redis, backendPort, metrics, broadcastMetrics) {
       `[LEADER] Acquired lock for ${req.originalUrl}. Forwarding to backend.`
     );
     try {
-      // Create a timeout promise that will reject after 15 seconds.
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
           reject(new Error(`Request timed out after 15 seconds`));
         }, 15000);
       });
 
-      // Race the actual backend request against our timeout.
       const backendResponse = await Promise.race([
         axios({
           method: req.method,
