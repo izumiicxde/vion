@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -28,12 +28,32 @@ const LatencyDashboard = () => {
   const [cachedLatencies, setCachedLatencies] = useState([]);
   const [requests, setRequests] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [cacheEnabled, setCacheEnabled] = useState(true);
   const [stats, setStats] = useState({
     cacheHits: 0,
     cacheMisses: 0,
     backendCalls: 0,
     activeRequests: 0,
   });
+
+  // Fetch initial cache toggle state
+  useEffect(() => {
+    fetch("http://localhost:3001/api/v1/cache-status")
+      .then((res) => res.json())
+      .then((data) => setCacheEnabled(data.smartCacheEnabled))
+      .catch(() => setCacheEnabled(true));
+  }, []);
+
+  const toggleSmartCache = async () => {
+    try {
+      setCacheEnabled((prev) => !prev);
+      const res = await fetch("http://localhost:3001/api/v1/toggle-cache");
+      const data = await res.json();
+      setCacheEnabled(data.smartCacheEnabled);
+    } catch (err) {
+      console.error("Error toggling cache:", err);
+    }
+  };
 
   const updateLatencyData = (original, cached) => {
     setOriginalLatencies((prev) => [...prev, original]);
@@ -94,6 +114,7 @@ const LatencyDashboard = () => {
     setIsProcessing(false);
   };
 
+  // --- Chart Configuration ---
   const chartData = {
     labels: originalLatencies.map((_, i) => `${i + 1}`),
     datasets: [
@@ -121,11 +142,50 @@ const LatencyDashboard = () => {
     maintainAspectRatio: false,
     plugins: {
       legend: { labels: { color: "#ddd" } },
-      title: { display: false },
+      tooltip: {
+        enabled: true,
+        backgroundColor: "#1f2937",
+        titleColor: "#fff",
+        bodyColor: "#fff",
+        padding: 10,
+        cornerRadius: 8,
+        displayColors: false,
+        callbacks: {
+          label: (context) =>
+            `${context.dataset.label}: ${context.parsed.y.toFixed(2)} ms`,
+        },
+      },
+    },
+    interaction: {
+      mode: "nearest",
+      intersect: false,
+    },
+    hover: {
+      mode: "nearest",
+      intersect: false,
     },
     scales: {
-      x: { ticks: { color: "#ccc" }, grid: { color: "#222" } },
-      y: { ticks: { color: "#ccc" }, grid: { color: "#222" } },
+      x: {
+        ticks: { color: "#ccc" },
+        grid: { color: "#222" },
+        title: { display: true, text: "Request #", color: "#ccc" },
+      },
+      y: {
+        ticks: { color: "#ccc" },
+        grid: { color: "#222" },
+        title: { display: true, text: "Latency (ms)", color: "#ccc" },
+      },
+    },
+    elements: {
+      line: {
+        borderWidth: 2,
+        tension: 0.4,
+      },
+      point: {
+        radius: 5,
+        hoverRadius: 7,
+        hoverBorderWidth: 3,
+      },
     },
   };
 
@@ -133,7 +193,33 @@ const LatencyDashboard = () => {
     <div className="min-h-screen min-w-screen bg-[#0d1117] text-gray-100 flex flex-col overflow-hidden m-0 p-0">
       {/* Top Stats Bar */}
       <div className="bg-[#0d1117] py-4 px-6 flex justify-between items-center shadow-md border-b border-gray-800">
-        <h1 className="text-2xl font-semibold text-white">⚡ Smart Caching Proxy</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold text-white">
+            ⚡ Smart Caching Proxy
+          </h1>
+
+          {/* Toggle Switch */}
+          <button
+            onClick={toggleSmartCache}
+            className={`relative inline-flex items-center h-6 rounded-full w-12 transition-colors ${
+              cacheEnabled ? "bg-green-500" : "bg-gray-600"
+            }`}
+          >
+            <span
+              className={`inline-block w-5 h-5 transform bg-white rounded-full transition-transform ${
+                cacheEnabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+          <span
+            className={`text-sm font-medium ${
+              cacheEnabled ? "text-green-400" : "text-gray-400"
+            }`}
+          >
+            {cacheEnabled ? "Smart Cache ON" : "Smart Cache OFF"}
+          </span>
+        </div>
+
         <div className="flex gap-6 text-sm font-medium">
           <div className="flex flex-col items-center text-green-400">
             <span className="text-lg font-bold">{stats.cacheHits}</span>
