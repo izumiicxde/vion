@@ -10,6 +10,7 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
+import { Link } from "react-router-dom";
 
 ChartJS.register(
   CategoryScale,
@@ -169,7 +170,7 @@ const LatencyDashboard = () => {
         borderColor: "rgba(59,130,246,0.9)",
         backgroundColor: "rgba(59,130,246,0.3)",
         tension: 0.4,
-        fill: true,
+        fill: false,
       },
       {
         label: "Proxy/Cached Latency (ms)",
@@ -177,7 +178,7 @@ const LatencyDashboard = () => {
         borderColor: "rgba(34,197,94,0.9)",
         backgroundColor: "rgba(34,197,94,0.3)",
         tension: 0.4,
-        fill: true,
+        fill: false,
       },
     ],
   };
@@ -247,7 +248,7 @@ const LatencyDashboard = () => {
               cacheEnabled ? "text-green-400" : "text-gray-400"
             }`}
           >
-            {cacheEnabled ? "Smart Cache ON" : "Smart Cache OFF"}
+            {cacheEnabled ? "With Queuing" : "Without Queueing"}
           </span>
         </div>
 
@@ -340,6 +341,10 @@ const LatencyDashboard = () => {
           className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50"
         >
           Test 5 Concurrent Requests
+        </button>
+
+        <button className="border border-white px-4 py-2 rounded-lg font-medium disabled:opacity-50">
+          <Link to={"/live-metrics"}>Go to Live Dashboard</Link>
         </button>
       </div>
     </div>
