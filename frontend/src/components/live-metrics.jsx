@@ -344,8 +344,8 @@ const LiveMetrics = () => {
     <div className="min-h-screen bg-[#0d1117] text-gray-200 font-sans">
       <header className="bg-[#161b22] border-b border-gray-800 shadow-md sticky top-0 z-10">
         <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-white">
-            ⚡ Smart Concurrency Gateway
+          <h1 className="text-xl font-bold text-white uppercase">
+            Smart Concurrency Gateway
           </h1>
           <nav>
             <Link
@@ -409,7 +409,7 @@ const LiveMetrics = () => {
 
         <section className="bg-[#161b22] rounded-lg border border-gray-800 p-6">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-yellow-400">
+            <h2 className="text-xl font-semibold text-yellow-400 uppercase">
               Live Queue Logs
             </h2>
             <button
